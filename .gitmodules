@@ -1,0 +1,4 @@
+[submodule "d_glat"]
+	path = d_glat
+	url = https://github.com/glathoud/d_glat
+	branch = dmd_v2.100.1
