@@ -4,6 +4,7 @@
      // (-debug compiles faster, plus lets check a few more things)
 
 import primes_4m;
+import d_glat.core_assert;
 import d_glat.lib_search_bisection;
 import std.algorithm;
 import std.array;
@@ -14,7 +15,7 @@ import std.math;
 import std.range;
 import std.stdio;
 
-enum ATKIN_UPDATE = false;
+enum ATKIN_UPDATE = false; // too slow
 
 void main()
 {
@@ -83,21 +84,29 @@ void display_some_about(R)( in string name, R r, size_t n_max = 1000, size_t n_d
     {
       auto x = r.front;
 
-      static if (!ATKIN_UPDATE)
-        if (x > big_primes[ $-1 ])
-          break;
-      
       immutable xs = format( "%d", x ); 
       
       if (xs.length > n_digit_max)
         break;
 
-      immutable is_prime = get_is_prime( x );
-      immutable  d_prev  = get_d_prev( x );
-      immutable  d_next  = get_d_next( x );
-      
-      writefln( "%s#"~fmt_i~": "~fmt_x~"  is_prime: %d  d_prev:%+3d  d_next:%+3d", name, i, xs, is_prime ? 1 : 0, d_prev, d_next );
-      
+      static if (ATKIN_UPDATE)
+        immutable get_info = true;
+      else
+        immutable get_info = x <= big_primes[ $-1 ];
+
+      if (get_info)
+        {
+          immutable is_prime = get_is_prime( x );
+          immutable  d_prev  = get_d_prev( x );
+          immutable  d_next  = get_d_next( x );
+          
+          writefln( "%s#"~fmt_i~": "~fmt_x~"  is_prime: %d  d_prev:%+3d  d_next:%+3d", name, i, xs, is_prime ? 1 : 0, d_prev, d_next );
+        }
+      else
+        {
+          writefln( "%s#"~fmt_i~": "~fmt_x, name, i, xs );
+        }
+
       r.popFront;
     }
 }
@@ -151,14 +160,18 @@ private BigInt[] _big_primes;
 BigInt[] get_big_primes()
 {
   if (_big_primes.length == 0)
-    _big_primes = primes.map!BigInt.array;
-
+    {
+      writeln( "xxx get_big_primes 000"); stdout.flush;
+      _big_primes = primes.map!BigInt.array;
+      writeln( "xxx get_big_primes 111"); stdout.flush;
+    }
+  
   return _big_primes;
 }
 
 
 
-void atkin_update_big_primes( ref BigInt[] big_primes, BigInt limitSqrt )
+void atkin_update_big_primes( ref BigInt[] big_primes, BigInt limit )
 {
   /* based on:
      https://en.wikipedia.org/wiki/Sieve_of_Atkin
@@ -166,9 +179,7 @@ void atkin_update_big_primes( ref BigInt[] big_primes, BigInt limitSqrt )
      (see copy below)
    */
 
-  // xxx todo: consider taking `limit` as input and computing `limitSqrt`. Less overkill.
-  
-  scope auto limit = limitSqrt * limitSqrt;
+  scope auto limitSqrt = bigint_sqrt_ceil( limit );
 
   // Move from `big_primes` representation to `sieve` representation
   scope bool[BigInt] sieve;
@@ -177,9 +188,14 @@ void atkin_update_big_primes( ref BigInt[] big_primes, BigInt limitSqrt )
   scope BigInt n, x, xx, y, yy, i;
 
   scope immutable bp_init_max = big_primes[$-1];
+
+  writefln( "limit: %s    limitSqrt: %s   bp_init_max:%s    2+bp_init_max<=limitSqrt:%s"
+            , limit, limitSqrt, bp_init_max,  2+bp_init_max<=limitSqrt);stdout.flush;
   
-  for (x = 2 + bp_init_max; x <= limitSqrt; ++x)
+  for (x = 1; x <= limitSqrt; ++x)
     {
+      writeln( "xxx atkin update x   ", x ); stdout.flush;
+
       xx = x*x;
       for (y = 1; y <= limitSqrt; ++y) {
         yy = y*y;
@@ -188,28 +204,37 @@ void atkin_update_big_primes( ref BigInt[] big_primes, BigInt limitSqrt )
          }
          // first quadratic using m = 12 and r in R1 = {r : 1, 5}
          n = (4 * xx) + (yy);
-         if (n <= limit && (n % 12 == 1 || n % 12 == 5)) {
-           sieve[n] = !sieve[n];
+         if (bp_init_max < n  &&  n <= limit && (n % 12 == 1 || n % 12 == 5)) {
+           sieve[n] = !sieve.get( n, false );
          }
          // second quadratic using m = 12 and r in R2 = {r : 7}
          n = (3 * xx) + (yy);
-         if (n <= limit && (n % 12 == 7)) {
-           sieve[n] = !sieve[n];
+         if (bp_init_max < n  &&  n <= limit && (n % 12 == 7)) {
+           sieve[n] = !sieve.get( n, false );
          }
          // third quadratic using m = 12 and r in R3 = {r : 11}
          n = (3 * xx) - (yy);
-         if (x > y && n <= limit && (n % 12 == 11)) {
-           sieve[n] = !sieve[n];
+         if (bp_init_max < n  &&  x > y && n <= limit && (n % 12 == 11)) {
+           sieve[n] = !sieve.get( n, false );
          }
+
+         if (auto ptr = n in sieve)
+           {
+             if (!(*ptr))
+               sieve.remove( n );
+           }
        }
     }
 
   // false each primes multiples
   for (n = 5; n <= limitSqrt; n++) {
-    if (sieve[n]) {
+
+    // writeln( "xxx atking update n   ", n ); stdout.flush;
+
+    if (sieve.get( n, false )) {
       x = n * n;
       for (i = x; i <= limit; i += x) {
-        sieve[i] = false;
+        sieve.remove( i );
       }
     }
   }
@@ -281,3 +306,49 @@ void atkin_update_big_primes( ref BigInt[] big_primes, BigInt limitSqrt )
 primes = sieveOfAtkin(5000);
 */
 
+
+
+BigInt bigint_sqrt_ceil( in BigInt x )
+{
+  mixin(alwaysAssertStderr!`0 <= x`);
+  
+  if (x < 3)
+    return x; // 0=>0, 1=>1, 2=>2
+  
+  scope BigInt a = 2;
+  scope BigInt b = 1 + x / 2;
+
+  scope BigInt aa, bb, m, mm;
+
+  // bisection search
+  
+  while (b - a > 1)
+    {
+      aa = a * a;
+      if (aa == x)
+        return a;
+      
+      bb = b * b;
+      if (bb == x)
+        return b;
+
+      m  = (a+b)/2;
+      mm = m * m;
+
+      if (a < m  &&  mm <= x)
+        {
+          a = m;
+          continue;
+        }
+
+      if (m < b  &&  x <= mm)
+        {
+          b = m;
+          continue;
+        }
+
+      break;
+    }
+
+  return b;
+}
