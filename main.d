@@ -14,6 +14,8 @@ import std.math;
 import std.range;
 import std.stdio;
 
+enum ATKIN_UPDATE = false;
+
 void main()
 {
   writeln("xxx"); stdout.flush;
@@ -74,15 +76,17 @@ void display_some_about(R)( in string name, R r, size_t n_max = 1000, size_t n_d
   immutable fmt_i = "%."~to!string( ceil( log(cast(double)( n_max )) / log(10.0) ) )~"d";
   immutable fmt_x = "%"~to!string(n_digit_max)~"s";
 
-  auto xxx_big_primes = get_big_primes();
+  static if (!ATKIN_UPDATE)
+    scope big_primes = get_big_primes();
   
   foreach (i; 0..n_max)
     {
       auto x = r.front;
 
-      if (x > xxx_big_primes[ $-1 ]) // xxx for now - because our implementation is too slow
-        break;       
-
+      static if (!ATKIN_UPDATE)
+        if (x > big_primes[ $-1 ])
+          break;
+      
       immutable xs = format( "%d", x ); 
       
       if (xs.length > n_digit_max)
@@ -105,51 +109,8 @@ bool get_is_prime( in BigInt x )
   if (x <= big_primes[ $-1 ])
     return -1 < search_bisection_exact( big_primes, x );
 
-  /* search for more prime numbers
-
-     probably not efficient at all, but results cached into the `big_primes` array
-
-     xxx todo: replace/combine with Atkin sieve 
-  */
-  while (x > big_primes[ $-1 ])
-    {
-      scope auto y = big_primes[ $-1 ]+2;
-      scope BigInt q, r;
-      while (y <= x)
-        {
-          scope y_half = y / 2;
-          bool  is_y_prime = true;
-          foreach (bp; big_primes)
-            {
-              if (bp > y_half)
-                break;
-
-              divMod( y, bp, q, r );
-
-              writeln( "xxx y ", y , "   bp ", bp,  "  q ", q, "  r ", r  );
-              
-
-              if (r == 0)
-                {
-                  is_y_prime = false;
-                  break;
-                }
-            }
-
-          if (is_y_prime)
-            {
-              writeln( "xxx y is prime!   ", y );
-              big_primes ~= y;
-            }
-          else
-            {
-              writeln( "xxx y is NOT prime!    ", y );
-            }
-
-          y += 2;
-        }
-    }
-
+  atkin_update_big_primes( big_primes, max( x, big_primes[ $-1 ] + 1000 ) );
+                           
   return get_is_prime( x );
 }
 
@@ -194,4 +155,129 @@ BigInt[] get_big_primes()
 
   return _big_primes;
 }
+
+
+
+void atkin_update_big_primes( ref BigInt[] big_primes, BigInt limitSqrt )
+{
+  /* based on:
+     https://en.wikipedia.org/wiki/Sieve_of_Atkin
+     https://gist.github.com/kramtark/277c0657530572e92c48
+     (see copy below)
+   */
+
+  // xxx todo: consider taking `limit` as input and computing `limitSqrt`. Less overkill.
+  
+  scope auto limit = limitSqrt * limitSqrt;
+
+  // Move from `big_primes` representation to `sieve` representation
+  scope bool[BigInt] sieve;
+  foreach (bp; big_primes)  sieve[ bp ] = true;
+  
+  scope BigInt n, x, xx, y, yy, i;
+
+  scope immutable bp_init_max = big_primes[$-1];
+  
+  for (x = 2 + bp_init_max; x <= limitSqrt; ++x)
+    {
+      xx = x*x;
+      for (y = 1; y <= limitSqrt; ++y) {
+        yy = y*y;
+        if (xx + yy >= limit) {
+          break;
+         }
+         // first quadratic using m = 12 and r in R1 = {r : 1, 5}
+         n = (4 * xx) + (yy);
+         if (n <= limit && (n % 12 == 1 || n % 12 == 5)) {
+           sieve[n] = !sieve[n];
+         }
+         // second quadratic using m = 12 and r in R2 = {r : 7}
+         n = (3 * xx) + (yy);
+         if (n <= limit && (n % 12 == 7)) {
+           sieve[n] = !sieve[n];
+         }
+         // third quadratic using m = 12 and r in R3 = {r : 11}
+         n = (3 * xx) - (yy);
+         if (x > y && n <= limit && (n % 12 == 11)) {
+           sieve[n] = !sieve[n];
+         }
+       }
+    }
+
+  // false each primes multiples
+  for (n = 5; n <= limitSqrt; n++) {
+    if (sieve[n]) {
+      x = n * n;
+      for (i = x; i <= limit; i += x) {
+        sieve[i] = false;
+      }
+    }
+  }
+  
+  // Actual update: move back from `sieve` representation to `big_primes` representation
+  scope auto bp_app = appender!(BigInt[]);
+  
+  bp_app.put( big_primes );
+  
+  foreach (ref bp; sieve.keys.dup.sort)
+    {
+      if (bp > bp_init_max  &&  sieve[ bp ])
+        bp_app.put( bp );
+    }
+  
+  big_primes = bp_app.data;
+}
+
+/* original JS implementation
+
+ function sieveOfAtkin(limit){
+   var limitSqrt = Math.sqrt(limit);
+   var sieve = [];
+   var n;
+
+   //prime start from 2, and 3
+   sieve[2] = true;
+   sieve[3] = true;
+
+   for (var x = 1; x <= limitSqrt; x++) {
+       var xx = x*x;
+       for (var y = 1; y <= limitSqrt; y++) {
+           var yy = y*y;
+           if (xx + yy >= limit) {
+             break;
+           }
+           // first quadratic using m = 12 and r in R1 = {r : 1, 5}
+           n = (4 * xx) + (yy);
+           if (n <= limit && (n % 12 == 1 || n % 12 == 5)) {
+               sieve[n] = !sieve[n];
+           }
+           // second quadratic using m = 12 and r in R2 = {r : 7}
+           n = (3 * xx) + (yy);
+           if (n <= limit && (n % 12 == 7)) {
+               sieve[n] = !sieve[n];
+           }
+           // third quadratic using m = 12 and r in R3 = {r : 11}
+           n = (3 * xx) - (yy);
+           if (x > y && n <= limit && (n % 12 == 11)) {
+               sieve[n] = !sieve[n];
+           }
+       }
+   }
+
+   // false each primes multiples
+   for (n = 5; n <= limitSqrt; n++) {
+       if (sieve[n]) {
+           x = n * n;
+           for (var i = x; i <= limit; i += x) {
+               sieve[i] = false;
+           }
+       }
+   }
+
+   //primes values are the one which sieve[x] = true
+   return sieve;
+}
+
+primes = sieveOfAtkin(5000);
+*/
 
